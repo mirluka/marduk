@@ -65,7 +65,7 @@ impl Lexer {
             }
 
             let token = match ch {
-                'a'..'z' => self.parse_word(ch, &chars, &mut offset)?,
+                'a'..'z' => self.parse_word_or_keyword(ch, &chars, &mut offset)?,
                 '(' => Token::OpenParantheses,
                 ')' => Token::CloseParantheses,
                 ',' => Token::Comma,
@@ -78,7 +78,7 @@ impl Lexer {
         Ok(tokens)
     }
 
-    fn parse_word(
+    fn parse_word_or_keyword(
         &self,
         read_char: char,
         chars: &[char],
@@ -129,7 +129,7 @@ mod tests {
 
     #[test]
     fn parse_get_query_with_object_name() {
-        let test_query: &str = "get process_az (name, start_time)";
+        let test_query: &str = "get process_az(name, start_time)";
 
         let lexer = Lexer::new(test_query.to_string()).unwrap();
 
