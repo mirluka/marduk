@@ -20,6 +20,7 @@ const SINGLE_CHAR_OPERATORS: &[char] = &[',', '(', ')', '=', '>', '-'];
 enum LexerError {
     ExhaustedInput,
     UnknownCharacter(char),
+    InvalidIdentifierCharacter(char),
     InvalidInteger(usize),
     UnknownError(usize),
 }
@@ -31,6 +32,9 @@ impl Display for LexerError {
         match self {
             LexerError::ExhaustedInput => write!(f, "Exhausted Input"),
             LexerError::UnknownCharacter(ch) => write!(f, "Unknown character in the query: {}", ch),
+            LexerError::InvalidIdentifierCharacter(ch) => {
+                write!(f, "Invalid identifier character: {}", ch)
+            }
             LexerError::InvalidInteger(offset) => {
                 write!(f, "Invalid integer at position {}", offset)
             }
@@ -87,9 +91,9 @@ impl Lexer {
             }
 
             let token = match ch {
-                'a'..'z' => self.parse_word_or_keyword(ch, &chars, &mut offset),
-                'A'..'Z' => self.parse_word_or_keyword(ch, &chars, &mut offset),
-                '0'..'9' => self.parse_integer(ch, &chars, &mut offset)?,
+                'a'..='z' => self.parse_word_or_keyword(ch, &chars, &mut offset)?,
+                'A'..='Z' => self.parse_word_or_keyword(ch, &chars, &mut offset)?,
+                '0'..='9' => self.parse_integer(ch, &chars, &mut offset)?,
                 // Parse negative integers
                 '-' => self.parse_integer(ch, &chars, &mut offset)?,
                 '(' => Token::Operator(Operator::OpenParantheses),
@@ -97,7 +101,8 @@ impl Lexer {
                 ',' => Token::Operator(Operator::Comma),
                 '=' => Token::Operator(Operator::Equals),
                 '>' => Token::Operator(Operator::BiggerThan),
-                '"' => self.parse_string(&chars, &mut offset)?,
+                '"' => self.parse_string('\"', &chars, &mut offset)?,
+                '\'' => self.parse_string('\'', &chars, &mut offset)?,
                 _ => return Err(LexerError::UnknownCharacter(ch)),
             };
 
@@ -107,14 +112,19 @@ impl Lexer {
         Ok(tokens)
     }
 
-    fn parse_string(&self, chars: &[char], offset: &mut usize) -> Result<Token, LexerError> {
+    fn parse_string(
+        &self,
+        string_start_ch: char,
+        chars: &[char],
+        offset: &mut usize,
+    ) -> Result<Token, LexerError> {
         let mut string_completed: bool = false;
         let mut ch_vector = Vec::with_capacity(30);
 
         while *offset < chars.len() {
             let ch = chars[*offset];
 
-            if ch == '"' {
+            if ch == string_start_ch {
                 string_completed = true;
                 break;
             }
@@ -123,10 +133,9 @@ impl Lexer {
             *offset += 1;
         }
 
-        println!("{:?}", ch_vector);
-
         if string_completed {
             let string: String = ch_vector.into_iter().collect();
+            // Increment offset by 1 to pass the closing quote
             *offset += 1;
 
             Ok(Token::String(string))
@@ -172,7 +181,12 @@ impl Lexer {
             .map(|i| Token::Integer(i))
     }
 
-    fn parse_word_or_keyword(&self, read_char: char, chars: &[char], offset: &mut usize) -> Token {
+    fn parse_word_or_keyword(
+        &self,
+        read_char: char,
+        chars: &[char],
+        offset: &mut usize,
+    ) -> Result<Token, LexerError> {
         let mut word_vector = Vec::with_capacity(30);
 
         word_vector.push(read_char);
@@ -188,8 +202,16 @@ impl Lexer {
                 break;
             }
 
+            match ch {
+                '0'..='9' => word_vector.push(ch),
+                'a'..='z' => word_vector.push(ch),
+                'A'..='Z' => word_vector.push(ch),
+                '_' => word_vector.push(ch),
+                '-' => word_vector.push(ch),
+                _ => return Err(LexerError::InvalidIdentifierCharacter(ch)),
+            }
+
             *offset += 1;
-            word_vector.push(ch);
         }
 
         let word = String::from_iter(word_vector);
@@ -199,7 +221,7 @@ impl Lexer {
             .map(|keyword| Token::Keyword(keyword.to_owned()))
             .unwrap_or(Token::Word(word));
 
-        token
+        Ok(token)
     }
 
     fn is_escape_character(&self, ch: char) -> bool {
@@ -239,8 +261,65 @@ mod tests {
     }
 
     #[test]
+    fn fail_to_parse_unclosed_strings() {
+        let query: &str = "\"ABC";
+
+        let lexer = Lexer::new(query.to_string()).unwrap();
+
+        let error = lexer.generate_tokens().unwrap_err();
+
+        assert_eq!(error, LexerError::ExhaustedInput)
+    }
+
+    #[test]
+    fn fail_to_parse_unclosed_strings_2() {
+        let query: &str = "ABC\"";
+
+        let lexer = Lexer::new(query.to_string()).unwrap();
+
+        let error = lexer.generate_tokens().unwrap_err();
+
+        assert_eq!(error, LexerError::InvalidIdentifierCharacter('"'))
+    }
+
+    #[test]
+    fn fail_to_parse_unclosed_strings_with_single_quote() {
+        let query: &str = "'ABC";
+
+        let lexer = Lexer::new(query.to_string()).unwrap();
+
+        let error = lexer.generate_tokens().unwrap_err();
+
+        assert_eq!(error, LexerError::ExhaustedInput)
+    }
+
+    #[test]
+    fn fail_to_parse_unclosed_strings_2_with_single_quote() {
+        let query: &str = "ABC'";
+
+        let lexer = Lexer::new(query.to_string()).unwrap();
+
+        let error = lexer.generate_tokens().unwrap_err();
+
+        assert_eq!(error, LexerError::InvalidIdentifierCharacter('\''))
+    }
+
+    #[test]
     fn parse_string() {
         let query: &str = "\"marduk\"";
+        let expected_tokens = vec![Token::String("marduk".to_string())];
+
+        let lexer = Lexer::new(query.to_string()).unwrap();
+
+        match lexer.generate_tokens() {
+            Ok(tokens) => assert_eq!(tokens, expected_tokens),
+            Err(err) => panic!("Test failed with error: {:?}", err),
+        }
+    }
+
+    #[test]
+    fn parse_string_with_single_quote() {
+        let query: &str = "'marduk'";
         let expected_tokens = vec![Token::String("marduk".to_string())];
 
         let lexer = Lexer::new(query.to_string()).unwrap();
