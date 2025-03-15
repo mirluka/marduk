@@ -6,12 +6,18 @@ enum Keyword {
     Get,
     Pick,
     And,
+    Order,
+    Asc,
+    Format
 }
 
 const KEYWORDS_MAP: phf::Map<&'static str, Keyword> = phf_map! {
     "get" => Keyword::Get,
     "pick" => Keyword::Pick,
     "and" => Keyword::And,
+    "order" => Keyword::Order,
+    "asc" => Keyword::Asc,
+    "format" => Keyword::Format,
 };
 
 const SINGLE_CHAR_OPERATORS: &[char] = &[',', '(', ')', '=', '>', '-'];
@@ -420,6 +426,39 @@ mod tests {
             Token::Word("temp".to_string()),
             Token::Operator(Operator::Equals),
             Token::Integer(-12),
+        ];
+
+        match lexer.generate_tokens() {
+            Ok(tokens) => assert_eq!(tokens, expected_tokens),
+            Err(err) => panic!("Test failed with error: {:?}", err),
+        }
+    }
+
+    #[test]
+    fn parse_order_keyword() {
+        let query: &str = "order name ASC";
+        let lexer = Lexer::new(query.to_string()).unwrap();
+
+        let expected_tokens = vec![
+            Token::Keyword(Keyword::Order),
+            Token::Word("name".to_string()),
+            Token::Keyword(Keyword::Asc),
+        ];
+
+        match lexer.generate_tokens() {
+            Ok(tokens) => assert_eq!(tokens, expected_tokens),
+            Err(err) => panic!("Test failed with error: {:?}", err),
+        }
+    }
+
+    #[test]
+    fn parse_format_keyword() {
+        let query: &str = "format YAML";
+        let lexer = Lexer::new(query.to_string()).unwrap();
+
+        let expected_tokens = vec![
+            Token::Keyword(Keyword::Format),
+            Token::Word("YAML".to_string()),
         ];
 
         match lexer.generate_tokens() {
