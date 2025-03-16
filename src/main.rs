@@ -8,7 +8,7 @@ enum Keyword {
     And,
     Order,
     Asc,
-    Format
+    Format,
 }
 
 const KEYWORDS_MAP: phf::Map<&'static str, Keyword> = phf_map! {
@@ -242,6 +242,36 @@ fn main() {
 #[cfg(test)]
 mod tests {
 
+    macro_rules! lexer_test_success {
+        ($($name: ident: $query: expr => $expected: expr), *) => {
+            $(
+                #[test]
+                fn $name() {
+                    let lexer = Lexer::new($query.to_string()).unwrap();
+
+                    match lexer.generate_tokens() {
+                        Ok(tokens) => assert_eq!(tokens, $expected),
+                        Err(err) => panic!("Test failed with error: {:?}", err),
+                    }
+                }
+            )*
+        };
+    }
+
+    macro_rules! lexer_test_failure {
+        ($($name: ident: $query: expr => $expected: expr), *) => {
+            $(
+                #[test]
+                fn $name() {
+                    let lexer = Lexer::new($query.to_string()).unwrap();
+                    let error = lexer.generate_tokens().unwrap_err();
+
+                    assert_eq!(error, $expected)
+                }
+            )*
+        };
+    }
+
     use super::*;
 
     #[test]
@@ -253,144 +283,26 @@ mod tests {
         assert_eq!(lexer, LexerError::ExhaustedInput);
     }
 
-    #[test]
-    fn parse_word() {
-        let query: &str = "process";
-        let expected_tokens = vec![Token::Word("process".to_string())];
-
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        match lexer.generate_tokens() {
-            Ok(tokens) => assert_eq!(tokens, expected_tokens),
-            Err(err) => panic!("Test failed with error: {:?}", err),
-        }
+    lexer_test_failure! {
+        fail_to_parse_unclosed_strings: "\"ABC" => LexerError::ExhaustedInput,
+        fail_to_parse_unclosed_strings_empty_space_end: "\"ABC  " => LexerError::ExhaustedInput,
+        fail_to_parse_unclosed_strings_2: "ABC\"" => LexerError::InvalidIdentifierCharacter('\"'),
+        fail_to_parse_unclosed_strings_with_single_quote_with_empty_beginning: "    'ABC" => LexerError::ExhaustedInput,
+        fail_to_parse_unclosed_strings_with_single_quote: "'ABC" => LexerError::ExhaustedInput,
+        fail_to_parse_unclosed_strings_2_with_single_quote: "ABC'" => LexerError::InvalidIdentifierCharacter('\''),
+        fail_to_parse_invalid_integers: "1a0" => LexerError::InvalidInteger(1),
+        fail_to_parse_negative_invalid_integers: "-1a0" => LexerError::InvalidInteger(2),
+        fail_to_parse_single_minus_character: "-" => LexerError::InvalidInteger(0),
+        fail_to_parse_unknown_character: "@" => LexerError::UnknownCharacter('@')
     }
 
-    #[test]
-    fn fail_to_parse_unclosed_strings() {
-        let query: &str = "\"ABC";
-
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        let error = lexer.generate_tokens().unwrap_err();
-
-        assert_eq!(error, LexerError::ExhaustedInput)
-    }
-
-    #[test]
-    fn fail_to_parse_unclosed_strings_2() {
-        let query: &str = "ABC\"";
-
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        let error = lexer.generate_tokens().unwrap_err();
-
-        assert_eq!(error, LexerError::InvalidIdentifierCharacter('"'))
-    }
-
-    #[test]
-    fn fail_to_parse_unclosed_strings_with_single_quote() {
-        let query: &str = "'ABC";
-
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        let error = lexer.generate_tokens().unwrap_err();
-
-        assert_eq!(error, LexerError::ExhaustedInput)
-    }
-
-    #[test]
-    fn fail_to_parse_unclosed_strings_2_with_single_quote() {
-        let query: &str = "ABC'";
-
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        let error = lexer.generate_tokens().unwrap_err();
-
-        assert_eq!(error, LexerError::InvalidIdentifierCharacter('\''))
-    }
-
-    #[test]
-    fn parse_string() {
-        let query: &str = "\"marduk\"";
-        let expected_tokens = vec![Token::String("marduk".to_string())];
-
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        match lexer.generate_tokens() {
-            Ok(tokens) => assert_eq!(tokens, expected_tokens),
-            Err(err) => panic!("Test failed with error: {:?}", err),
-        }
-    }
-
-    #[test]
-    fn parse_string_with_single_quote() {
-        let query: &str = "'marduk'";
-        let expected_tokens = vec![Token::String("marduk".to_string())];
-
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        match lexer.generate_tokens() {
-            Ok(tokens) => assert_eq!(tokens, expected_tokens),
-            Err(err) => panic!("Test failed with error: {:?}", err),
-        }
-    }
-
-    #[test]
-    fn fail_to_parse_invalid_integers() {
-        let query: &str = "1a0";
-
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        let error = lexer.generate_tokens().unwrap_err();
-
-        assert_eq!(error, LexerError::InvalidInteger(1))
-    }
-
-    #[test]
-    fn fail_to_parse_single_minus_character() {
-        let query: &str = "-";
-
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        let error = lexer.generate_tokens().unwrap_err();
-
-        assert_eq!(error, LexerError::InvalidInteger(0))
-    }
-
-    #[test]
-    fn parse_positive_integer() {
-        let query: &str = "10";
-        let expected_tokens = vec![Token::Integer(10)];
-
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        match lexer.generate_tokens() {
-            Ok(tokens) => assert_eq!(tokens, expected_tokens),
-            Err(err) => panic!("Test failed with error: {:?}", err),
-        }
-    }
-
-    #[test]
-    fn parse_negative_integer() {
-        let query: &str = "-10";
-        let expected_tokens = vec![Token::Integer(-10)];
-
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        match lexer.generate_tokens() {
-            Ok(tokens) => assert_eq!(tokens, expected_tokens),
-            Err(err) => panic!("Test failed with error: {:?}", err),
-        }
-    }
-
-    #[test]
-    fn parse_get_query_with_object_name() {
-        let query: &str = "get process_az(name, start_time)";
-
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        let expected_tokens = vec![
+    lexer_test_success! {
+        parse_word: "process" => vec![Token::Word("process".to_string())],
+        parse_string: "\"marduk\"" => vec![Token::String("marduk".to_string())],
+        parse_string_with_single_quote: "'marduk'" => vec![Token::String("marduk".to_string())],
+        parse_positive_integer: "10" => vec![Token::Integer(10)],
+        parse_negative_integer: "-10" => vec![Token::Integer(-10)],
+        parse_get_query_with_object_name: "get process_az(name, start_time)" => vec![
             Token::Keyword(Keyword::Get),
             Token::Word("process_az".to_string()),
             Token::Operator(Operator::OpenParantheses),
@@ -398,20 +310,8 @@ mod tests {
             Token::Operator(Operator::Comma),
             Token::Word("start_time".to_string()),
             Token::Operator(Operator::CloseParantheses),
-        ];
-
-        match lexer.generate_tokens() {
-            Ok(tokens) => assert_eq!(tokens, expected_tokens),
-            Err(err) => panic!("Test failed with error: {:?}", err),
-        }
-    }
-
-    #[test]
-    fn parse_get_query_with_pick_keyword() {
-        let query: &str = "get process pick name = \"marduk\" AND pid > 100 AND temp = -12";
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        let expected_tokens = vec![
+        ],
+        parse_get_query_with_pick_keyword: "get process pick name = \"marduk\" AND pid > 100 AND temp = -12" => vec![
             Token::Keyword(Keyword::Get),
             Token::Word("process".to_string()),
             Token::Keyword(Keyword::Pick),
@@ -426,44 +326,32 @@ mod tests {
             Token::Word("temp".to_string()),
             Token::Operator(Operator::Equals),
             Token::Integer(-12),
-        ];
-
-        match lexer.generate_tokens() {
-            Ok(tokens) => assert_eq!(tokens, expected_tokens),
-            Err(err) => panic!("Test failed with error: {:?}", err),
-        }
-    }
-
-    #[test]
-    fn parse_order_keyword() {
-        let query: &str = "order name ASC";
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        let expected_tokens = vec![
+        ],
+        parse_order_keyword: "order name ASC" => vec![
             Token::Keyword(Keyword::Order),
             Token::Word("name".to_string()),
             Token::Keyword(Keyword::Asc),
-        ];
-
-        match lexer.generate_tokens() {
-            Ok(tokens) => assert_eq!(tokens, expected_tokens),
-            Err(err) => panic!("Test failed with error: {:?}", err),
-        }
-    }
-
-    #[test]
-    fn parse_format_keyword() {
-        let query: &str = "format YAML";
-        let lexer = Lexer::new(query.to_string()).unwrap();
-
-        let expected_tokens = vec![
+        ],
+        parse_format_keyword: "format YAML" => vec![
             Token::Keyword(Keyword::Format),
             Token::Word("YAML".to_string()),
-        ];
-
-        match lexer.generate_tokens() {
-            Ok(tokens) => assert_eq!(tokens, expected_tokens),
-            Err(err) => panic!("Test failed with error: {:?}", err),
-        }
+        ],
+        parse_keywords_with_various_spaces_between: "get pick        format" => vec![
+            Token::Keyword(Keyword::Get),
+            Token::Keyword(Keyword::Pick),
+            Token::Keyword(Keyword::Format)
+        ],
+        parse_case_insensitive_keywords: "get GET gEt pick PICK pIcK pICK  format FORMAT fOrMAT" => vec![
+            Token::Keyword(Keyword::Get),
+            Token::Keyword(Keyword::Get),
+            Token::Keyword(Keyword::Get),
+            Token::Keyword(Keyword::Pick),
+            Token::Keyword(Keyword::Pick),
+            Token::Keyword(Keyword::Pick),
+            Token::Keyword(Keyword::Pick),
+            Token::Keyword(Keyword::Format),
+            Token::Keyword(Keyword::Format),
+            Token::Keyword(Keyword::Format)
+        ]
     }
 }
