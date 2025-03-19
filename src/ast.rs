@@ -10,7 +10,6 @@ macro_rules! expect_token {
                     return Ok(val)
                 }
                 else {
-
                     return Err(AstError::UnexpectedToken(message, token))
                 }
             }
@@ -19,7 +18,7 @@ macro_rules! expect_token {
 
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum AstError<'a> {
     EmptyTree,
     UnexpectedToken(&'static str, &'a Token),
@@ -63,6 +62,7 @@ impl DirectiveTree {
     }
 }
 
+#[derive(Debug)]
 struct MarqlAst {
     tokens: Vec<Token>,
 }
@@ -107,6 +107,22 @@ mod tests {
     use crate::lexer::Keyword;
 
     use super::*;
+
+    #[test]
+    fn fail_when_no_tokens_provided() {
+        let tokens = Vec::new();
+        let ast_error = MarqlAst::new(tokens).unwrap_err();
+
+        assert_eq!(ast_error, AstError::EmptyTree)
+    }
+
+    #[test]
+    fn fail_when_a_single_token_provided() {
+        let tokens = vec![Token::Keyword(Keyword::Get)];
+        let ast_error = MarqlAst::new(tokens).unwrap_err();
+
+        assert_eq!(ast_error, AstError::EmptyTree)
+    }
 
     #[test]
     fn generate_ast_with_directive_type_and_name() {
