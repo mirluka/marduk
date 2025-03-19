@@ -2,13 +2,26 @@ use phf::{Map, phf_map};
 use std::fmt::Display;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-enum Keyword {
+pub enum Keyword {
     Get,
     Pick,
     And,
     Order,
     Asc,
     Format,
+}
+
+impl Display for Keyword {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Keyword::Get => write!(f, "GET"),
+            Keyword::Pick => write!(f, "PICK"),
+            Keyword::And => write!(f, "AND"),
+            Keyword::Order => write!(f, "ORDER"),
+            Keyword::Asc => write!(f, "ASC"),
+            Keyword::Format => write!(f, "FORMAT"),
+        }
+    }
 }
 
 const KEYWORDS_MAP: Map<&'static str, Keyword> = phf_map! {
@@ -23,7 +36,7 @@ const KEYWORDS_MAP: Map<&'static str, Keyword> = phf_map! {
 const SINGLE_CHAR_OPERATORS: &[char] = &[',', '(', ')', '=', '>', '-'];
 
 #[derive(Debug, PartialEq, Eq)]
-enum LexerError {
+pub enum LexerError {
     ExhaustedInput,
     UnknownCharacter(char),
     InvalidIdentifierCharacter(char),
@@ -52,7 +65,7 @@ impl Display for LexerError {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Operator {
+pub enum Operator {
     OpenParantheses,
     CloseParantheses,
     Comma,
@@ -60,8 +73,20 @@ enum Operator {
     BiggerThan,
 }
 
+impl Display for Operator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Operator::OpenParantheses => write!(f, "("),
+            Operator::CloseParantheses => write!(f, ")"),
+            Operator::Comma => write!(f, ","),
+            Operator::Equals => write!(f, "="),
+            Operator::BiggerThan => write!(f, ">"),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
-enum Token {
+pub enum Token {
     Word(String),
     Operator(Operator),
     Keyword(Keyword),
@@ -69,8 +94,20 @@ enum Token {
     Integer(i32),
 }
 
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::Word(word) => write!(f, "{}", word),
+            Token::Operator(operator) => write!(f, "{}", operator),
+            Token::Keyword(keyword) => write!(f, "{}", keyword),
+            Token::String(string) => write!(f, "\"{}\"", string),
+            Token::Integer(int) => write!(f, "{}", int),
+        }
+    }
+}
+
 #[derive(Debug)]
-struct Lexer {
+pub struct Lexer {
     query_str: String,
 }
 
