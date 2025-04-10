@@ -106,6 +106,12 @@ impl Display for Token {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct GeneratedToken {
+    offset: usize,
+    token: Token,
+}
+
 #[derive(Debug)]
 pub struct Lexer {
     query_str: String,
@@ -120,13 +126,14 @@ impl Lexer {
         Ok(Self { query_str: query })
     }
 
-    pub fn generate_tokens(&self) -> Result<Vec<Token>, LexerError> {
+    pub fn generate_tokens(&self) -> Result<Vec<GeneratedToken>, LexerError> {
         let chars: Vec<char> = self.query_str.chars().collect();
         let mut tokens = Vec::with_capacity(10);
         let mut offset = 0;
 
         while offset < chars.len() {
             let ch = chars[offset];
+            let token_offset = offset;
             offset += 1;
             // If the character we read is empty, new line or tab then continue with the next character
             if ch == ' ' || self.is_escape_character(ch) {
@@ -149,7 +156,12 @@ impl Lexer {
                 _ => return Err(LexerError::UnknownCharacter(ch)),
             };
 
-            tokens.push(token);
+            let generated_token = GeneratedToken {
+                offset: token_offset,
+                token: token,
+            };
+
+            tokens.push(generated_token);
         }
 
         Ok(tokens)
@@ -283,7 +295,10 @@ mod tests {
                     let lexer = Lexer::new($query.to_string()).unwrap();
 
                     match lexer.generate_tokens() {
-                        Ok(tokens) => assert_eq!(tokens, $expected),
+                        Ok(generated_tokens) => {
+                            let tokens:Vec<Token> = generated_tokens.into_iter().map(|gt| gt.token).collect();
+                            assert_eq!(tokens, $expected)
+                        },
                         Err(err) => panic!("Test failed with error: {:?}", err),
                     }
                 }
