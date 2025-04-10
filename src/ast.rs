@@ -102,8 +102,6 @@ impl MarqlAst {
             }
         };
 
-        println!("hello!");
-
         let directive_class = self.expect_directive_class(&self.tokens[1..])?;
 
         Ok(DirectiveTree::new(directive_type, directive_class))
@@ -118,10 +116,21 @@ impl MarqlAst {
         }
 
         let name = self.expect_word(&token_slice[0], "Expected a directive name")?;
-        let fields = if token_slice.len() == 1 {
-            None
+        let fields = if token_slice.len() > 1 {
+            match &token_slice[1] {
+                Token::Operator(op) if op == &Operator::OpenParantheses => {
+                    Some(self.get_class_fields(&token_slice[1..])?)
+                }
+                Token::Keyword(_) => None,
+                _ => {
+                    return Err(AstError::UnexpectedToken(
+                        "Unexpected character(s) after class definition",
+                        &token_slice[1],
+                    ));
+                }
+            }
         } else {
-            Some(self.get_class_fields(&token_slice[1..])?)
+            None
         };
 
         Ok(DirectiveClass {
@@ -236,12 +245,12 @@ mod tests {
             Token::Keyword(Keyword::Get),
             Token::Word("test".to_string()),
             Token::Operator(Operator::CloseParantheses)
-        ] => AstError::UnexpectedToken("Expected \"(\" after directive name", &Token::Operator(Operator::CloseParantheses)),
+        ] => AstError::UnexpectedToken("Unexpected character(s) after class definition", &Token::Operator(Operator::CloseParantheses)),
         fail_when_directive_field_with_no_parantheses: vec![
             Token::Keyword(Keyword::Get),
             Token::Word("test".to_string()),
             Token::Word("hello".to_string())
-        ] => AstError::UnexpectedToken("Expected \"(\" after directive name", &Token::Word("hello".to_string())),
+        ] => AstError::UnexpectedToken("Unexpected character(s) after class definition", &Token::Word("hello".to_string())),
         fail_when_directive_field_with_no_closed_parantheses: vec![
             Token::Keyword(Keyword::Get),
             Token::Word("test".to_string()),
