@@ -1,12 +1,17 @@
 use crate::lexer::{Keyword, Operator, Token};
+use std::cell::Cell;
 use std::error::Error;
 use std::fmt::Display;
 
 macro_rules! expect_token {
     ($($name: ident: $token_type: path, $expected: ident), *) => {
         $(
-            fn $name<'a>(&self, token: &'a Token, message: &'static str) -> Result<&'a $expected, AstError<'a>> {
+            fn $name(&self, message: &'static str) -> Result<&$expected, AstError> {
+                let offset = self.offset.get();
+                let token = &self.tokens.get(offset).ok_or(AstError::UnexpectedEndOfTokens)?;
+
                 if let $token_type(val) = token {
+                    self.offset.set(offset + 1);
                     return Ok(val)
                 }
                 else {
@@ -76,6 +81,7 @@ impl DirectiveTree {
 #[derive(Debug)]
 struct MarqlAst {
     tokens: Vec<Token>,
+    offset: Cell<usize>,
 }
 
 impl MarqlAst {
@@ -84,42 +90,42 @@ impl MarqlAst {
             return Err(AstError::EmptyTree);
         }
 
-        Ok(Self { tokens })
+        Ok(Self {
+            tokens: tokens,
+            offset: Cell::new(0),
+        })
     }
 
     pub fn build_directive_tree(&self) -> Result<DirectiveTree, AstError> {
-        let first_token = &self.tokens[0];
-        let directive_type_keyword =
-            self.expect_keyword(first_token, "Expected directive (GET)")?;
+        let directive_type_keyword = self.expect_keyword("Expected directive (GET)")?;
 
         let directive_type = match directive_type_keyword {
             Keyword::Get => Directive::Get,
             _ => {
                 return Err(AstError::UnexpectedToken(
                     "Expected directive (GET)",
-                    first_token,
+                    &self.tokens[0],
                 ));
             }
         };
 
-        let directive_class = self.expect_directive_class(&self.tokens[1..])?;
+        let directive_class = self.expect_directive_class()?;
 
         Ok(DirectiveTree::new(directive_type, directive_class))
     }
 
-    fn expect_directive_class<'a>(
-        &self,
-        token_slice: &'a [Token],
-    ) -> Result<DirectiveClass, AstError<'a>> {
+    fn expect_directive_class(&self) -> Result<DirectiveClass, AstError> {
+        let token_slice = &self.tokens[self.offset.get()..];
+
         if token_slice.is_empty() {
             return Err(AstError::NoDirective);
         }
 
-        let name = self.expect_word(&token_slice[0], "Expected a directive name")?;
+        let name = self.expect_word("Expected a directive name")?;
         let fields = if token_slice.len() > 1 {
             match &token_slice[1] {
                 Token::Operator(op) if op == &Operator::OpenParantheses => {
-                    Some(self.get_class_fields(&token_slice[1..])?)
+                    Some(self.get_class_fields()?)
                 }
                 Token::Keyword(_) => None,
                 _ => {
@@ -139,33 +145,23 @@ impl MarqlAst {
         })
     }
 
-    fn get_class_fields<'a>(&self, tokens: &'a [Token]) -> Result<Vec<String>, AstError<'a>> {
-        let open_parantheses_op =
-            self.expect_operator(&tokens[0], "Expected \"(\" after directive name")?;
+    fn get_class_fields(&self) -> Result<Vec<String>, AstError> {
+        let open_parantheses_op = self.expect_operator("Expected \"(\" after directive name")?;
 
         if open_parantheses_op != &Operator::OpenParantheses {
             return Err(AstError::UnexpectedToken(
                 "Expected \"(\" after directive name",
-                &tokens[0],
+                &self.tokens[self.offset.get()],
             ));
         }
 
         let mut fields = Vec::with_capacity(10);
-
-        let mut token_index = 1;
-        let tokens_len = tokens.len();
         let mut fields_collected = false;
 
-        while token_index + 1 < tokens_len {
-            let field_name = self.expect_word(&tokens[token_index], "Expected directive field")?;
-
-            // Switch to comma operator
-            token_index += 1;
-
-            let comma_or_parantheses_op = self.expect_operator(
-                &tokens[token_index],
-                "Expected comma (,) or closed parantheses \")\"",
-            )?;
+        while self.offset.get() < self.tokens.len() {
+            let field_name = self.expect_word("Expected directive field")?;
+            let comma_or_parantheses_op =
+                self.expect_operator("Expected comma (,) or closed parantheses \")\"")?;
 
             //If the fields are being closed then exit the loop.
             if comma_or_parantheses_op == &Operator::CloseParantheses {
@@ -177,10 +173,9 @@ impl MarqlAst {
             if comma_or_parantheses_op != &Operator::Comma {
                 return Err(AstError::UnexpectedToken(
                     "Expected comma (,) or closed parantheses \")\"",
-                    &tokens[token_index],
+                    &self.tokens[self.offset.get() - 1],
                 ));
             }
-            token_index += 1;
 
             fields.push(field_name.to_owned());
         }
@@ -288,6 +283,7 @@ mod tests {
             Token::Keyword(Keyword::Get),
             Token::Word("products".to_string()),
         ];
+        let tokens_len = tokens.len();
         let ast = MarqlAst::new(tokens).unwrap();
 
         let directive_tree = ast.build_directive_tree().unwrap();
@@ -295,6 +291,7 @@ mod tests {
         assert_eq!(directive_tree.directive_type(), &Directive::Get);
         assert_eq!(directive_tree.class().name, "products".to_string());
         assert_eq!(directive_tree.class().fields, None);
+        assert_eq!(ast.offset.get(), tokens_len);
     }
 
     #[test]
@@ -308,6 +305,7 @@ mod tests {
             Token::Word("field2".to_string()),
             Token::Operator(Operator::CloseParantheses),
         ];
+        let tokens_len = tokens.len();
         let ast = MarqlAst::new(tokens).unwrap();
 
         let directive_tree = ast.build_directive_tree().unwrap();
@@ -318,6 +316,7 @@ mod tests {
             directive_tree.class().fields,
             Some(vec!["field1".to_string(), "field2".to_string()])
         );
+        assert_eq!(ast.offset.get(), tokens_len);
     }
 
     #[test]
@@ -329,6 +328,7 @@ mod tests {
             Token::Word("field1".to_string()),
             Token::Operator(Operator::CloseParantheses),
         ];
+        let tokens_len = tokens.len();
         let ast = MarqlAst::new(tokens).unwrap();
 
         let directive_tree = ast.build_directive_tree().unwrap();
@@ -339,5 +339,6 @@ mod tests {
             directive_tree.class().fields,
             Some(vec!["field1".to_string()])
         );
+        assert_eq!(ast.offset.get(), tokens_len);
     }
 }
