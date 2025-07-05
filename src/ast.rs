@@ -28,6 +28,7 @@ enum AstError<'a> {
     EmptyTree,
     NoDirective,
     UnexpectedEndOfTokens,
+    EmptyPickExpression,
     UnexpectedToken(&'static str, &'a Token),
 }
 
@@ -38,6 +39,7 @@ impl<'a> Display for AstError<'a> {
             AstError::NoDirective => write!(f, "No directive provided."),
             AstError::UnexpectedEndOfTokens => write!(f, "Query is not complete."),
             AstError::EmptyTree => write!(f, "Empty syntax tree"),
+            AstError::EmptyPickExpression => write!(f, "Empty PICK expression definition"),
         }
     }
 }
@@ -49,23 +51,41 @@ enum Directive {
     Get,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum PickAtomic {
+    Identifier(String),
+    String(String),
+    Integer(i32),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PickExpression {
+    Atomic(PickAtomic),
+    Equals(PickAtomic, PickAtomic),
+    And(Box<PickExpression>, Box<PickExpression>),
+    Or(Box<PickExpression>, Box<PickExpression>)
+}
+
+
 #[derive(Debug)]
 struct DirectiveClass {
     name: String,
-    fields: Option<Vec<String>>,
+    fields: Option<Vec<String>>
 }
 
 #[derive(Debug)]
 struct DirectiveTree {
     directive_type: Directive,
     class: DirectiveClass,
+    pick: Option<PickExpression>
 }
 
 impl DirectiveTree {
-    pub fn new(directive_type: Directive, class: DirectiveClass) -> Self {
+    pub fn new(directive_type: Directive, class: DirectiveClass, pick: Option<PickExpression>) -> Self {
         Self {
             directive_type,
             class,
+            pick
         }
     }
 
@@ -75,6 +95,10 @@ impl DirectiveTree {
 
     pub fn directive_type(&self) -> &Directive {
         &self.directive_type
+    }
+
+    pub fn pick(&self) -> &Option<PickExpression> {
+        &self.pick
     }
 }
 
@@ -110,8 +134,9 @@ impl MarqlAst {
         };
 
         let directive_class = self.expect_directive_class()?;
+        let pick_expression = self.parse_pick()?;
 
-        Ok(DirectiveTree::new(directive_type, directive_class))
+        Ok(DirectiveTree::new(directive_type, directive_class, pick_expression))
     }
 
     fn expect_directive_class(&self) -> Result<DirectiveClass, AstError> {
@@ -185,6 +210,118 @@ impl MarqlAst {
         }
 
         Ok(fields)
+    }
+
+    fn parse_pick(&self) -> Result<Option<PickExpression>, AstError> {
+        let offset = self.offset.get();
+
+        if self.offset.get() == self.tokens.len() {
+            return Ok(None);
+        }
+
+        let token = &self.tokens[self.offset.get() as usize];
+
+        if let Token::Keyword(Keyword::Pick) = token {
+            let new_offset = offset + 1;
+            self.offset.set(new_offset);
+
+            // Check if we have more tokens after the pick keyword. if not, then return an error
+            // with UnexpextedEndOfTokens
+            if new_offset == self.tokens.len() {
+                return Err(AstError::UnexpectedEndOfTokens);
+            } else {
+                let identifier_stack = Vec::with_capacity(10);
+                return self.parse_pick_expression(identifier_stack).map(|exp| Some(exp));
+            }
+        } else {
+            return Ok(None)
+        }
+
+    }
+
+    fn parse_pick_expression(&self, mut expression_stack: Vec<PickExpression>) -> Result<PickExpression, AstError> {
+
+        while let Some(token_ref) = self.tokens.get(self.offset.get() as usize) {
+
+            match token_ref {
+                Token::Word(word) => {
+                    let expression = self.parse_pick_atomic_identifier(&mut expression_stack, word)?;
+                    expression_stack.push(expression);
+                },
+                Token::Operator(operator) => todo!(),
+                Token::Keyword(keyword) => todo!(),
+                Token::String(string) => {
+                    let expression = self.parse_pick_atomic_string(&mut expression_stack, string)?;
+                    expression_stack.push(expression);
+                },
+                Token::Integer(integer) => {
+                    let expression = self.parse_pick_atomic_integer(&mut expression_stack, integer.clone())?;
+                    expression_stack.push(expression);
+                },
+            }
+
+        }
+
+        //TODO: Check cases when identifier_stack has more than 1 element
+
+        match expression_stack.pop() {
+            Some(pick_expression) => Ok(pick_expression),
+            None => Err(AstError::EmptyPickExpression),
+        }
+    }
+
+    fn parse_pick_atomic_identifier(&self, expression_stack: &mut Vec<PickExpression>, word: &String) -> Result<PickExpression, AstError> {
+       let last_expression =  expression_stack.last();
+       let token = &self.tokens[self.offset.get()];
+       self.offset.set(self.offset.get() + 1);
+
+       match last_expression {
+           Some(exp) => {
+               if let PickExpression::Atomic(_) = exp {
+                   Err(AstError::UnexpectedToken("Identifiers can only be used with operators", token))
+               } else {
+                   Ok(PickExpression::Atomic(PickAtomic::Identifier(word.to_string()))) 
+               }
+           }
+           None => Ok(PickExpression::Atomic(PickAtomic::Identifier(word.to_string())))
+       }
+
+    }
+
+    fn parse_pick_atomic_string(&self, expression_stack: &mut Vec<PickExpression>, word: &String) -> Result<PickExpression, AstError> {
+       let last_expression =  expression_stack.last();
+       let token = &self.tokens[self.offset.get()];
+       self.offset.set(self.offset.get() + 1);
+
+       match last_expression {
+           Some(exp) => {
+               if let PickExpression::Atomic(_) = exp {
+                   Err(AstError::UnexpectedToken("Strings can only be used with operators", token))
+               } else {
+                   Ok(PickExpression::Atomic(PickAtomic::String(word.to_string()))) 
+               }
+           }
+           None => Err(AstError::UnexpectedToken("Strings can only be used with operators", token))
+       }
+
+    }
+
+    fn parse_pick_atomic_integer(&self, expression_stack: &mut Vec<PickExpression>, int: i32) -> Result<PickExpression, AstError> {
+       let last_expression =  expression_stack.last();
+       let token = &self.tokens[self.offset.get()];
+       self.offset.set(self.offset.get() + 1);
+
+       match last_expression {
+           Some(exp) => {
+               if let PickExpression::Atomic(_) = exp {
+                   Err(AstError::UnexpectedToken("Integers can only be used with operators", token))
+               } else {
+                   Ok(PickExpression::Atomic(PickAtomic::Integer(int))) 
+               }
+           }
+           None => Err(AstError::UnexpectedToken("Integers can only be used with operators", token))
+       }
+
     }
 
     expect_token! {
@@ -341,4 +478,25 @@ mod tests {
         );
         assert_eq!(ast.offset.get(), tokens_len);
     }
+
+    #[test]
+    fn generate_ast_with_basic_pick_fields() {
+        let tokens = vec![
+            Token::Keyword(Keyword::Get),
+            Token::Word("products".to_string()),
+            Token::Keyword(Keyword::Pick),
+            Token::Word("valid".to_string()),
+        ];
+        let tokens_len = tokens.len();
+        let ast = MarqlAst::new(tokens).unwrap();
+
+        let directive_tree = ast.build_directive_tree().unwrap();
+
+        assert_eq!(directive_tree.directive_type(), &Directive::Get);
+        assert_eq!(directive_tree.class().name, "products".to_string());
+        assert_eq!(directive_tree.class().fields, None);
+        assert_eq!(directive_tree.pick().as_ref().unwrap(), &PickExpression::Atomic(PickAtomic::Identifier("valid".to_string())));
+        assert_eq!(ast.offset.get(), tokens_len);
+    }
+
 }
